@@ -31,8 +31,3 @@ func AfterFunc(ctx context.Context, do func()) (func() bool, <-chan struct{}) {
 		return false
 	}, exit
 }
-
-func SyncAfterFuncNoStop(ctx context.Context, do func()) {
-	_, ch := AfterFunc(ctx, do)
-	<-ch
-}
