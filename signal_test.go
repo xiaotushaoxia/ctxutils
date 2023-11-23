@@ -3,7 +3,6 @@ package ctxutils
 import (
 	"context"
 	"fmt"
-	"syscall"
 	"testing"
 )
 
@@ -29,7 +28,7 @@ func TestWithSignalsCancelCause(t *testing.T) {
 	//fmt.Println(ctx2.Err())          // context canceled
 	//fmt.Println(context.Cause(ctx2)) // context canceled
 
-	if ctx2.Err() == context.Canceled {
+	if ctx2.Err() != context.Canceled {
 		t.Fatalf("ctx2 err is not context.Canceled")
 	}
 	if context.Cause(ctx) != cause {
@@ -69,8 +68,12 @@ func TestSignalsCtx(t *testing.T) {
 		close(c)
 	})
 
-	s := ctx.(*signalContext)
-	s.signalChan <- syscall.SIGINT
-
 	<-c
+}
+
+func TestCancel(t *testing.T) {
+	ctx := SignalsCtx(context.Background())
+
+	fmt.Println(context.Cause(ctx))
+	fmt.Println(ctx.Err())
 }

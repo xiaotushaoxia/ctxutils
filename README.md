@@ -13,7 +13,8 @@ func main() {
 
 ### AfterFunc Example:
 
-doc in context.AfterFunc says "If the caller needs to know whether f is completed,  it must coordinate with f explicitly."
+> If the caller needs to know whether f is completed,  it must coordinate with f explicitly. ——doc in context.AfterFunc
+
 so I add it
 
 ```go

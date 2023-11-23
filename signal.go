@@ -5,9 +5,18 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync/atomic"
+	"runtime"
+	"sync"
 	"syscall"
 )
+
+type SignalError struct {
+	Signal os.Signal
+}
+
+func (e SignalError) Error() string {
+	return fmt.Sprintf("got signal: %s", e.Signal)
+}
 
 // WithSignalsCause and WithSignals format is consistent with std context
 // like context.WithTimeout和context.WithTimeoutCause
@@ -20,76 +29,95 @@ import (
 // Canceling this context releases resources associated with it, so code should
 // call cancel as soon as the operations running in this Context complete.
 func WithSignals(parent context.Context, sigs ...os.Signal) (ctx context.Context, cancel context.CancelFunc) {
-	return context.WithCancel(SignalsCtx(parent, sigs...))
+	ctx, stop := NotifyContext(parent, sigs...)
+	return ctx, func() {
+		stop(context.Canceled)
+	}
+	//return context.WithCancel(SignalsCtx(parent, sigs...))
 }
 
 // WithSignalsCause behaves like [WithSignals] but also sets the cause of the
 // returned Context when the get sigs. The returned [CancelFunc] does
 // not set the cause.
 func WithSignalsCause(parent context.Context, sigs ...os.Signal) (ctx context.Context, cancel context.CancelCauseFunc) {
-	return context.WithCancelCause(SignalsCtx(parent, sigs...))
+	return NotifyContext(parent, sigs...)
 }
 
 // SignalsCtx
 // WithXXX usually return ctx,cancel. This func only return ctx, so I don't named it WithXXX
-func SignalsCtx(parent context.Context, sigs ...os.Signal) (ctx context.Context) {
-	return newSignalContext(parent, sigs...)
+func SignalsCtx(parent context.Context, signals ...os.Signal) (ctx context.Context) {
+	ctx, _ = NotifyContext(parent, signals...)
+	return
 }
 
-func newSignalContext(parent context.Context, sigs ...os.Signal) *signalContext {
-	if parent == nil {
-		panic("cannot create context from nil parent")
+func NotifyContext(parent context.Context, signals ...os.Signal) (ctx context.Context, stop context.CancelCauseFunc) {
+	parent2, cancelCause := context.WithCancelCause(parent)
+	if len(signals) == 0 {
+		signals = []os.Signal{syscall.SIGTERM, syscall.SIGINT}
+	}
+	ctx = &signalCtx{
+		Context:     parent2,
+		cancelCause: cancelCause,
+		signals:     signals,
+	}
+	ch := make(chan os.Signal, 1)
+
+	var once sync.Once
+	stop = func(cause error) {
+		once.Do(func() {
+			cancelCause(cause)
+			signal.Stop(ch)
+		})
 	}
 
-	if len(sigs) == 0 {
-		sigs = []os.Signal{syscall.SIGTERM, syscall.SIGINT}
+	signal.Notify(ch, signals...)
+	if parent2.Err() == nil {
+		go watch(ch, parent2, stop)
 	}
 
-	ctx := &signalContext{
-		Context:    parent,
-		done:       make(chan struct{}),
-		signalChan: make(chan os.Signal),
-	}
-	signal.Notify(ctx.signalChan, sigs...)
-
-	go func() {
-		select {
-		case sig := <-ctx.signalChan:
-			ctx.err.Store(SignalError{sig})
-		case <-parent.Done():
-			ctx.err.Store(parent.Err())
-		}
-		close(ctx.done)
-	}()
-
-	return ctx
+	runtime.SetFinalizer(ctx, func(*signalCtx) {
+		stop(context.Canceled)
+	})
+	return
 }
 
-type signalContext struct {
-	// Context is the parent context
+type signalCtx struct {
 	context.Context
-	done chan struct{}
-	err  atomic.Value
+	cancelCause context.CancelCauseFunc
 
-	signalChan chan os.Signal // for easy test
+	signals []os.Signal // for String()
 }
 
-func (s *signalContext) Done() <-chan struct{} {
-	return s.done
-}
-
-func (s *signalContext) Err() error {
-	val := s.err.Load()
-	if val == nil {
-		return nil
+func (c *signalCtx) String() string {
+	var buf []byte
+	// We know that the type of c.Context is context.cancelCtx, and we know that the
+	// String method of cancelCtx returns a string that ends with ".WithCancel".
+	name := c.Context.(interface {
+		String() string
+	}).String()
+	name = name[:len(name)-len(".WithCancel")]
+	buf = append(buf, "signalCtx("+name...)
+	if len(c.signals) != 0 {
+		buf = append(buf, ", ["...)
+		for i, s := range c.signals {
+			buf = append(buf, s.String()...)
+			if i != len(c.signals)-1 {
+				buf = append(buf, ' ')
+			}
+		}
+		buf = append(buf, ']')
 	}
-	return val.(error)
+	buf = append(buf, ')')
+	return string(buf)
 }
 
-type SignalError struct {
-	Signal os.Signal
-}
-
-func (e SignalError) Error() string {
-	return fmt.Sprintf("got signal: %s", e.Signal)
+func watch(ch chan os.Signal, parent2 context.Context, do func(err error)) {
+	var err error
+	select {
+	case sig := <-ch:
+		err = SignalError{sig}
+	case <-parent2.Done():
+		err = parent2.Err()
+	}
+	do(err)
 }
