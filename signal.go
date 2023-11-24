@@ -67,6 +67,7 @@ func NotifyContext(parent context.Context, signals ...os.Signal) (ctx context.Co
 		once.Do(func() {
 			cancelCause(cause)
 			signal.Stop(ch)
+			runtime.SetFinalizer(ctx, nil)
 		})
 	}
 
