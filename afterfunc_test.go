@@ -47,3 +47,26 @@ func TestAfterFuncSync1(t *testing.T) {
 	<-exit
 	fmt.Println("exit")
 }
+
+func TestAfterFuncSync2(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(time.Second)
+		cancel()
+	}()
+
+	stop, exit := AfterFunc(ctx, func() {
+		for i := 0; i < 3; i++ {
+			fmt.Println("倒计时", 3-i)
+			time.Sleep(time.Second)
+		}
+	})
+	defer func() {
+		stop()
+		<-exit
+	}()
+
+	for i := 0; i < 33; i++ {
+		fmt.Println("xxx", i)
+	}
+}

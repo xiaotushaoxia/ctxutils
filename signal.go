@@ -4,10 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"runtime"
-	"sync"
-	"syscall"
 )
 
 type SignalError struct {
@@ -33,7 +30,6 @@ func WithSignals(parent context.Context, sigs ...os.Signal) (ctx context.Context
 	return ctx, func() {
 		stop(context.Canceled)
 	}
-	//return context.WithCancel(SignalsCtx(parent, sigs...))
 }
 
 // WithSignalsCause behaves like [WithSignals] but also sets the cause of the
@@ -47,78 +43,33 @@ func WithSignalsCause(parent context.Context, sigs ...os.Signal) (ctx context.Co
 // WithXXX usually return ctx,cancel. This func only return ctx, so I don't named it WithXXX
 func SignalsCtx(parent context.Context, signals ...os.Signal) (ctx context.Context) {
 	ctx, _ = NotifyContext(parent, signals...)
-	return
+	return ctx
 }
 
-func NotifyContext(parent context.Context, signals ...os.Signal) (ctx context.Context, stop context.CancelCauseFunc) {
-	parent2, cancelCause := context.WithCancelCause(parent)
-	if len(signals) == 0 {
-		signals = []os.Signal{syscall.SIGTERM, syscall.SIGINT}
-	}
-	ctx = &signalCtx{
-		Context:     parent2,
-		cancelCause: cancelCause,
-		signals:     signals,
-	}
-	ch := make(chan os.Signal, 1)
+func NotifyContext(parent context.Context, signals ...os.Signal) (ctx context.Context, causeFunc context.CancelCauseFunc) {
+	ctx1, _causeFunc := notifyContext(parent, signals...)
 
-	var once sync.Once
-	stop = func(cause error) {
-		once.Do(func() {
-			cancelCause(cause)
-			signal.Stop(ch)
-			runtime.SetFinalizer(ctx, nil)
-		})
-	}
-
-	signal.Notify(ch, signals...)
-	if parent2.Err() == nil {
-		go watch(ch, parent2, stop)
-	}
-
-	runtime.SetFinalizer(ctx, func(*signalCtx) {
-		stop(context.Canceled)
+	// ctx1 can’t be gc automatically
+	// because I make a daemon goroutine for watching signal in notifyContext  and
+	// context package may make a daemon goroutine for watch parent
+	// wrap ctx1 into wrapContext, wrapContext can be gc simply
+	ctx = &wrapContext{ctx1}
+	//ctx = ctx1
+	runtime.SetFinalizer(ctx, func(context.Context) {
+		_causeFunc(context.Canceled)
 	})
-	return
+
+	return ctx, func(err error) {
+		runtime.SetFinalizer(ctx, nil)
+		_causeFunc(err)
+	}
 }
 
-type signalCtx struct {
+// wrapContext
+type wrapContext struct {
 	context.Context
-	cancelCause context.CancelCauseFunc
-
-	signals []os.Signal // for String()
 }
 
-func (c *signalCtx) String() string {
-	var buf []byte
-	// We know that the type of c.Context is context.cancelCtx, and we know that the
-	// String method of cancelCtx returns a string that ends with ".WithCancel".
-	name := c.Context.(interface {
-		String() string
-	}).String()
-	name = name[:len(name)-len(".WithCancel")]
-	buf = append(buf, "signalCtx("+name...)
-	if len(c.signals) != 0 {
-		buf = append(buf, ", ["...)
-		for i, s := range c.signals {
-			buf = append(buf, s.String()...)
-			if i != len(c.signals)-1 {
-				buf = append(buf, ' ')
-			}
-		}
-		buf = append(buf, ']')
-	}
-	buf = append(buf, ')')
-	return string(buf)
-}
-
-func watch(ch chan os.Signal, parent2 context.Context, do func(err error)) {
-	var err error
-	select {
-	case sig := <-ch:
-		err = SignalError{sig}
-	case <-parent2.Done():
-		err = parent2.Err()
-	}
-	do(err)
+func (c *wrapContext) String() string {
+	return fmt.Sprintf("%v", c.Context)
 }

@@ -3,6 +3,8 @@ package ctxutils
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"runtime"
 	"testing"
 )
 
@@ -43,7 +45,7 @@ func TestWithSignals(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func(_i int) {
 			<-ctx.Done()
-			fmt.Println(_i)
+			fmt.Println("put", _i)
 			ch <- _i
 		}(i)
 	}
@@ -76,4 +78,35 @@ func TestCancel(t *testing.T) {
 
 	fmt.Println(context.Cause(ctx))
 	fmt.Println(ctx.Err())
+}
+
+func TestGC(t *testing.T) {
+
+	for i := 0; i < 20; i++ {
+		ccc()
+		fmt.Println(runtime.NumGoroutine())
+		runtime.GC()
+	}
+
+}
+func ccc() {
+	var ctx context.Context
+	//var causeFunc context.CancelCauseFunc
+	//var cancel context.CancelFunc
+	switch rand.Int() % 3 {
+	case 0:
+		ctx = SignalsCtx(context.TODO())
+	case 1:
+		ctx, _ = WithSignalsCause(context.Background())
+		//causeFunc(fmt.Errorf("xsdsd"))
+	case 2:
+		ctx, _ = WithSignals(context.Background())
+		//cancel()
+	}
+	//causeFunc(fmt.Errorf("xxxxxx"))
+	//
+	//<-ctx.Done()
+	fmt.Println(ctx)
+
+	fmt.Println(ctx.Err(), context.Cause(ctx))
 }
