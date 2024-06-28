@@ -17,7 +17,7 @@ func main() {
     ctx3 := ctxutils.SignalsCtx(context.Background(), syscall.SIGINT)
     
     // syntactic sugar. same as `ctx4 := ctxutils.SignalsCtx(context.Background(), syscall.SIGKILL, syscall.SIGTERM, syscall.SIGINT)`
-    ctx4 := ctxutils.SignalCtxDefault()
+    ctx4 := ctxutils.SignalsCtxDefault()
 	
 	....
 }

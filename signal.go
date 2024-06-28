@@ -59,7 +59,7 @@ func SignalsCtx(parent context.Context, signals ...os.Signal) (ctx context.Conte
 	return ctx
 }
 
-func SignalCtxDefault(signals ...os.Signal) (ctx context.Context) {
+func SignalsCtxDefault(signals ...os.Signal) (ctx context.Context) {
 	ss := []os.Signal{syscall.SIGKILL, syscall.SIGTERM, syscall.SIGINT}
 	for _, signal := range signals {
 		existed := false
