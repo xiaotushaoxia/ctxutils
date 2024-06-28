@@ -2,6 +2,7 @@ package ctxutils
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,7 +26,7 @@ func notifyContext(parent context.Context, signals ...os.Signal) (ctx context.Co
 		go func() {
 			select {
 			case sig := <-c.ch:
-				c.stop(SignalError{sig})
+				c.stop(fmt.Errorf("%w: got signal: %s", context.Canceled, sig))
 			case <-c.Done():
 				c.stop(c.Err())
 			}

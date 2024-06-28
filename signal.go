@@ -8,14 +8,6 @@ import (
 	"syscall"
 )
 
-type SignalError struct {
-	Signal os.Signal
-}
-
-func (e SignalError) Error() string {
-	return fmt.Sprintf("got signal: %s", e.Signal)
-}
-
 // WithSignalsCause and WithSignals format is consistent with std context
 // like context.WithTimeout和context.WithTimeoutCause
 
