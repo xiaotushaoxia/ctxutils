@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"syscall"
 )
 
 type SignalError struct {
@@ -41,28 +42,42 @@ func WithSignalsCause(parent context.Context, sigs ...os.Signal) (ctx context.Co
 
 // SignalsCtx
 // WithXXX usually return ctx,cancel. This func only return ctx, so I don't named it WithXXX
+// not return cancel? how to avoid goroutine leaks?  use runtime.SetFinalizer.
+// note: done use this like !!!
+// ctx := SignalsCtx(context.Background(), syscall.SIGINT)
+// done := ctx.Done()
+// ctx = nil  // !!!! no refer to ctx. make ctx be gc
 func SignalsCtx(parent context.Context, signals ...os.Signal) (ctx context.Context) {
-	ctx, _ = NotifyContext(parent, signals...)
+	var cancel context.CancelCauseFunc
+	ctx, cancel = NotifyContext(parent, signals...)
+
+	ctx = &wrapContext{ctx}
+
+	runtime.SetFinalizer(ctx, func(context.Context) {
+		cancel(context.Canceled)
+	})
 	return ctx
 }
 
-func NotifyContext(parent context.Context, signals ...os.Signal) (ctx context.Context, causeFunc context.CancelCauseFunc) {
-	ctx1, _causeFunc := notifyContext(parent, signals...)
-
-	// ctx1 can’t be gc automatically
-	// because I make a daemon goroutine for watching signal in notifyContext  and
-	// context package may make a daemon goroutine for watch parent
-	// wrap ctx1 into wrapContext, wrapContext can be gc simply
-	ctx = &wrapContext{ctx1}
-	//ctx = ctx1
-	runtime.SetFinalizer(ctx, func(context.Context) {
-		_causeFunc(context.Canceled)
-	})
-
-	return ctx, func(err error) {
-		runtime.SetFinalizer(ctx, nil)
-		_causeFunc(err)
+func SignalCtxDefault(signals ...os.Signal) (ctx context.Context) {
+	ss := []os.Signal{syscall.SIGKILL, syscall.SIGTERM, syscall.SIGINT}
+	for _, signal := range signals {
+		existed := false
+		for _, s := range ss {
+			if s == signal {
+				existed = true
+				break
+			}
+		}
+		if !existed {
+			ss = append(ss, signal)
+		}
 	}
+	return SignalsCtx(context.Background(), ss...)
+}
+
+func NotifyContext(parent context.Context, signals ...os.Signal) (ctx context.Context, causeFunc context.CancelCauseFunc) {
+	return notifyContext(parent, signals...)
 }
 
 // wrapContext
